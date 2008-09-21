@@ -48,6 +48,11 @@ module OpenidServerSystem
     @ax_store_request ||= OpenID::AX::StoreRequest.from_openid_request(openid_request)
   end
 
+  # PAPE request reader
+  def pape_request
+    @pape_request ||= OpenID::PAPE::Request.from_openid_request(openid_request)
+  end
+
   # Adds SReg data (Hash) to an OpenID response.
   def add_sreg(resp, data)
     sreg_resp = OpenID::SReg::Response.extract_response(sreg_request, data)
@@ -66,12 +71,12 @@ module OpenidServerSystem
   end
   
   # Adds PAPE information for your server to an OpenID response.
-  # Currently there is no auth level implemented.
-  # TODO: Implement PAPE
-  def add_pape(resp)
+  def add_pape(resp, policies = [], nist_auth_level = 0, auth_time = nil)
     if papereq = OpenID::PAPE::Request.from_openid_request(openid_request)
       paperesp = OpenID::PAPE::Response.new
-      paperesp.nist_auth_level = 0
+      policies.each { |p| paperesp.add_policy_uri(p) }
+      paperesp.nist_auth_level = nist_auth_level
+      paperesp.auth_time = auth_time.utc.iso8601
       resp.add_extension(paperesp)
     end
     resp
@@ -93,5 +98,13 @@ module OpenidServerSystem
     else render(:text => web_response.body, :status => 400)
     end   
   end
-
+  
+  # If the request contains a max_auth_age, the last authentication date 
+  # must meet this requirement, otherwise the user has to reauthenticate:
+  # http://openid.net/specs/openid-provider-authentication-policy-extension-1_0-02.html#anchor9
+  def pape_requirements_met?(auth_time)
+    return true unless pape_request && pape_request.max_auth_age
+    (Time.now - auth_time).to_i <= pape_request.max_auth_age
+  end
+  
 end

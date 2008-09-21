@@ -48,7 +48,7 @@ class ServerController < ApplicationController
       resp = checkid_request.answer(true, nil, identity)
       resp = add_sreg(resp, @site.sreg_properties) if sreg_request
       resp = add_ax(resp, @site.ax_properties) if ax_fetch_request
-      resp = add_pape(resp)
+      resp = add_pape(resp, auth_policies, auth_level, auth_time)
       render_response(resp)
     elsif checkid_request.immediate && (sreg_request || ax_fetch_request)
       render_response(checkid_request.answer(false))
@@ -76,11 +76,14 @@ class ServerController < ApplicationController
       if params[:always]
         @site = current_account.sites.find_or_create_by_persona_id_and_url(params[:site][:persona_id], params[:site][:url])
         @site.update_attributes(params[:site])
+      elsif sreg_request || ax_fetch_request
+        @site = current_account.sites.find_or_initialize_by_persona_id_and_url(params[:site][:persona_id], params[:site][:url])
+        @site.attributes = params[:site]
       end
       resp = checkid_request.answer(true, nil, identifier(current_account))
-      resp = add_pape(resp)
-      resp = add_sreg(resp, params[:site][:sreg]) if sreg_request && params[:site][:sreg]
-      resp = add_ax(resp, transform_ax_data(params[:site][:ax])) if ax_fetch_request && params[:site][:ax]
+      resp = add_pape(resp, auth_policies, auth_level, auth_time)
+      resp = add_sreg(resp, @site.sreg_properties) if sreg_request && @site.sreg_properties
+      resp = add_ax(resp, @site.ax_properties) if ax_fetch_request && @site.ax_properties
       render_response(resp)
     end
   end
@@ -134,17 +137,25 @@ class ServerController < ApplicationController
       flash[:error] = 'The identity verification request is invalid.'
       redirect_to home_path
     elsif !allow_verification?
-      flash[:notice] = 'Please log in to verify your identity.'
+      flash[:notice] = logged_in? && !pape_requirements_met?(auth_time) ?
+        'The Service Provider requires reauthentication, because your last login is too long ago.' :
+        'Please log in to verify your identity.'
       session[:return_to] = proceed_path
       redirect_to login_path
     end
   end
   
+  # The user must be logged in, he must be the owner of the claimed identifier
+  # and the PAPE requirements must be met if applicable.
+  def allow_verification?
+    logged_in? && correct_identifier? && pape_requirements_met?(auth_time)
+  end
+  
   # Is the user allowed to verify the claimed identifier? The user
   # must be logged in, so that we know his identifier or the identifier
-  # has to be selected by the server (id_select)
-  def allow_verification?
-    logged_in? && (openid_request.identity == identifier(current_account) || openid_request.id_select)
+  # has to be selected by the server (id_select).
+  def correct_identifier?
+    (openid_request.identity == identifier(current_account) || openid_request.id_select)
   end
   
   # Clears the stored request and answers
@@ -172,6 +183,28 @@ class ServerController < ApplicationController
     else exception.to_s
     end
     render :text => "Invalid OpenID request: #{error}", :status => 500
+  end
+  
+  private
+  
+  # The NIST Assurance Level, see:
+  # http://openid.net/specs/openid-provider-authentication-policy-extension-1_0-01.html#anchor12
+  def auth_level
+    if APP_CONFIG['use_ssl']
+      current_account.last_authenticated_with_yubikey? ? 3 : 2
+    else
+      0
+    end
+  end
+  
+  def auth_time
+    current_account.last_authenticated_at
+  end
+  
+  def auth_policies
+    current_account.last_authenticated_with_yubikey? ? 
+      [OpenID::PAPE::AUTH_MULTI_FACTOR, OpenID::PAPE::AUTH_PHISHING_RESISTANT] :
+      []
   end
   
 end

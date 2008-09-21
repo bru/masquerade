@@ -44,7 +44,9 @@ class Test::Unit::TestCase
       :language => 'DE',
       :timezone => 'Europe/Berlin',
       :gender => 'M',
-      :dob => '1982-01-10' }
+      :dob_day => '10',
+      :dob_month => '01',
+      :dob_year => '1982' }
   end
   
   def valid_properties
@@ -100,9 +102,9 @@ class Test::Unit::TestCase
   def ax_fetch_request_params
     { 'openid.ns.ax' => OpenID::AX::AXMessage::NS_URI,
       'openid.ax.mode' => 'fetch_request',
-      'openid.ax.type.fullname' => 'http://axschema.org/namePerson',
+      'openid.ax.type.nickname' => 'http://axschema.org/namePerson/friendly',
       'openid.ax.type.gender' => 'http://axschema.org/person/gender',
-      'openid.ax.required' => 'fullname',
+      'openid.ax.required' => 'nickname',
       'openid.ax.if_available' => 'gender',
       'openid.ax.update_url' => 'http://test.com/update' }
   end
@@ -116,6 +118,15 @@ class Test::Unit::TestCase
       'openid.ax.count.email' => '2',
       'openid.ax.value.email.1' => 'mail@mydomain.com',
       'openid.ax.value.email.2' => 'info@mydomain.com' }
+  end
+  
+  def pape_request_params
+    { 'openid.ns.pape' => OpenID::PAPE::NS_URI,
+      'openid.pape.max_auth_age' => 'store_request',
+      'openid.pape.preferred_auth_policies' => [
+        OpenID::PAPE::AUTH_MULTI_FACTOR_PHYSICAL,
+        OpenID::PAPE::AUTH_MULTI_FACTOR,
+        OpenID::PAPE::AUTH_PHISHING_RESISTANT].join(' ') }
   end
   
   def assert_invalid(object, attribute, message = nil)
