@@ -10,7 +10,7 @@ class AccountsController < ApplicationController
       format.html do
         response.headers['X-XRDS-Location'] = formatted_identity_url(:account => @account, :format => :xrds, :protocol => scheme)
       end
-      #format.xrds
+      format.xrds
     end
   end
   
