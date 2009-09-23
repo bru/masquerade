@@ -1,3 +1,4 @@
+
 <div id="hcard-<%= persona.fullname ? persona.fullname.gsub(/\s/, '-') : @account.login %>" class="vcard">
 	<% if persona.web_blog %>
  <a class="url fn" href='<%= persona.web_blog %>' ><%= persona.fullname %></a>
