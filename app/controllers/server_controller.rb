@@ -10,7 +10,7 @@ class ServerController < ApplicationController
   before_filter :ensure_valid_checkid_request, :except => [:index, :cancel, :seatbelt_config, :seatbelt_login_state]
   after_filter :clear_checkid_request, :only => [:cancel, :complete]
   # These methods are used to display information about the request to the user
-  helper_method :sreg_request, :ax_fetch_request
+  helper_method :sreg_request, :ax_fetch_request, :ax_store_request
   
   # This is the server endpoint which handles all incoming OpenID requests.
   # Associate and CheckAuth requests are answered directly - functionality
@@ -26,7 +26,7 @@ class ServerController < ApplicationController
         elsif openid_request
           handle_non_checkid_request
         else
-          render :text => 'This is an OpenID server endpoint, not a human readable resource.'
+          render :text => t(:this_is_openid_not_a_human_ressource)
         end
       end
       format.xrds
@@ -50,7 +50,7 @@ class ServerController < ApplicationController
       resp = add_ax(resp, @site.ax_properties) if ax_fetch_request
       resp = add_pape(resp, auth_policies, auth_level, auth_time)
       render_response(resp)
-    elsif checkid_request.immediate && (sreg_request || ax_fetch_request)
+    elsif checkid_request.immediate && (sreg_request || ax_store_request || ax_fetch_request)
       render_response(checkid_request.answer(false))
     elsif checkid_request.immediate
       render_response(checkid_request.answer(true, nil, identity))
@@ -63,7 +63,7 @@ class ServerController < ApplicationController
   # choose which data should be transfered to the relying party.
   def decide
     @site = current_account.sites.find_or_initialize_by_url(checkid_request.trust_root)
-    @site.persona = current_account.personas.find(params[:persona_id] || :first) if sreg_request || ax_fetch_request
+    @site.persona = current_account.personas.find(params[:persona_id] || :first) if sreg_request || ax_store_request || ax_fetch_request
   end
   
   # This action is called by submitting the decision form, the information entered by
@@ -72,15 +72,33 @@ class ServerController < ApplicationController
   def complete
     if params[:cancel]
       cancel
-    else
+    else  
+      resp = checkid_request.answer(true, nil, identifier(current_account))
       if params[:always]
         @site = current_account.sites.find_or_create_by_persona_id_and_url(params[:site][:persona_id], params[:site][:url])
         @site.update_attributes(params[:site])
       elsif sreg_request || ax_fetch_request
         @site = current_account.sites.find_or_initialize_by_persona_id_and_url(params[:site][:persona_id], params[:site][:url])
         @site.attributes = params[:site]
+      elsif ax_store_request
+        @site = current_account.sites.find_or_initialize_by_persona_id_and_url(params[:site][:persona_id], params[:site][:url])
+        not_supported, not_accepted, accepted = [], [], []
+        ax_store_request.data.each do |type_uri, values|
+          if property = Persona.attribute_name_for_type_uri(type_uri)
+            store_attribute = params[:site][:ax_store][property.to_sym]
+            if store_attribute && !store_attribute[:value].blank?
+              @site.persona.update_attribute(property, values.first)
+              accepted << type_uri
+            else
+              not_accepted << type_uri
+            end
+          else
+            not_supported << type_uri
+          end
+        end
+        ax_store_response = (accepted.count > 0) ? OpenID::AX::StoreResponse.new : OpenID::AX::StoreResponse.new(false, "None of the attributes were accepted.")
+        resp.add_extension(ax_store_response)
       end
-      resp = checkid_request.answer(true, nil, identifier(current_account))
       resp = add_pape(resp, auth_policies, auth_level, auth_time)
       resp = add_sreg(resp, @site.sreg_properties) if sreg_request && @site.sreg_properties
       resp = add_ax(resp, @site.ax_properties) if ax_fetch_request && @site.ax_properties
@@ -107,16 +125,20 @@ class ServerController < ApplicationController
     elsif openid_request.immediate
       render_response(openid_request.answer(false))
     else
-      save_checkid_request
+      request = save_checkid_request
       session[:return_to] = proceed_path
-      redirect_to safe_login_path
+      redirect_to( request.from_trusted_domain? ? login_path : safe_login_path )
     end
   end
   
-  # Stores the current OpenID request
+  # Stores the current OpenID request.
+  # Returns the OpenIdRequest
   def save_checkid_request
     clear_checkid_request
-    session[:request_token] = OpenIdRequest.create(:parameters => openid_params).token
+    request = OpenIdRequest.create(:parameters => openid_params)
+    session[:request_token] = request.token
+
+    request
   end
   
   # Deletes the old request when a new one comes in.
@@ -134,12 +156,12 @@ class ServerController < ApplicationController
   def ensure_valid_checkid_request
     self.openid_request = checkid_request
     if !openid_request.is_a?(OpenID::Server::CheckIDRequest)
-      flash[:error] = 'The identity verification request is invalid.'
+      flash[:error] = t(:identity_verification_request_invalid)
       redirect_to home_path
     elsif !allow_verification?
       flash[:notice] = logged_in? && !pape_requirements_met?(auth_time) ?
-        'The Service Provider requires reauthentication, because your last login is too long ago.' :
-        'Please log in to verify your identity.'
+        t(:service_provider_requires_reauthentication_last_login_too_long_ago) :
+        t(:login_to_verify_identity)
       session[:return_to] = proceed_path
       redirect_to login_path
     end

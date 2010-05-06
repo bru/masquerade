@@ -18,9 +18,10 @@ class ConsumerController < ApplicationController
       oidreq.add_extension(sregreq)
       oidreq.return_to_args['did_sreg'] = 'y'
     end
-    if params[:use_ax]
+    if params[:use_ax_fetch]
       axreq = OpenID::AX::FetchRequest.new
-      requested_attrs = [['http://axschema.org/namePerson/friendly', 'nickname', true],
+      requested_attrs = [['https://openid.tzi.de/spec/schema', 'uid', true],
+                         ['http://axschema.org/namePerson/friendly', 'nickname', true],
                          ['http://axschema.org/contact/email', 'email', true],
                          ['http://axschema.org/namePerson', 'fullname'],
                          ['http://axschema.org/contact/web/default', 'website', false, 2],
@@ -32,7 +33,15 @@ class ConsumerController < ApplicationController
                          ['http://axschema.org/pref/timezone', 'timezone']]
       requested_attrs.each { |a| axreq.add(OpenID::AX::AttrInfo.new(a[0], a[1], a[2] || false, a[3] || 1)) }
       oidreq.add_extension(axreq)
-      oidreq.return_to_args['did_ax'] = 'y'
+      oidreq.return_to_args['did_ax_fetch'] = 'y'
+    end
+    if params[:use_ax_store]
+      ax_store_req = OpenID::AX::StoreRequest.new
+      ax_store_req.set_values('http://axschema.org/contact/email', %w(email@example.com))
+      ax_store_req.set_values('http://axschema.org/birthDate', %w(1976-08-07))
+      ax_store_req.set_values('http://axschema.org/customValueThatIsNotSupported', %w(unsupported))
+      oidreq.add_extension(ax_store_req)
+      oidreq.return_to_args['did_ax_store'] = 'y'
     end
     if params[:use_pape]
       papereq = OpenID::PAPE::Request.new
@@ -56,47 +65,61 @@ class ConsumerController < ApplicationController
     oidresp = openid_consumer.complete(parameters, url_for({}))
     case oidresp.status
     when OpenID::Consumer::SETUP_NEEDED
-      flash[:error] = "Immediate request failed - setup needed"
+      flash[:error] = t(:immediate_request_failed_setup_needed)
     when OpenID::Consumer::CANCEL
-      flash[:error] = "OpenID transaction cancelled."
+      flash[:error] = t(:openid_transaction_cancelled)
     when OpenID::Consumer::FAILURE
       flash[:error] = oidresp.display_identifier ?
-        "Verification of #{oidresp.display_identifier} failed: #{oidresp.message}" :
-        "Verification failed: #{oidresp.message}"
+        t(:verification_of_identifier_failed, :identifier => oidresp.display_identifier, :message => oidresp.message) :
+        t(:verification_failed_message, :message => oidresp.message)
     when OpenID::Consumer::SUCCESS
-      flash[:notice] = "Verification of #{oidresp.display_identifier} succeeded."
+      flash[:notice] = t(:verification_of_identifier_succeeded, :identifier => oidresp.display_identifier)
       if params[:did_sreg]
         sreg_resp = OpenID::SReg::Response.from_success_response(oidresp)
-        sreg_message = "\n\nSimple Registration data was requested"
+        sreg_message = "\n\n" + t(:simple_registration_data_requested)
         if sreg_resp.empty?
-          sreg_message << ", but none was returned."
+          sreg_message << ", " + t(:but_none_was_returned)
         else
-          sreg_message << ". The following data were sent:\n"
+          sreg_message << ". " + t(:the_following_data_were_sent) + "\n"
           sreg_resp.data.each { |k,v| sreg_message << "#{k}: #{v}\n" }
         end
         flash[:notice] += sreg_message
       end
-      if params[:did_ax]
-        ax_resp = OpenID::AX::FetchResponse.from_success_response(oidresp)
-        ax_message = "\n\nAttribute Exchange data was requested"
-        unless ax_resp
-          ax_message << ", but none was returned."
+      if params[:did_ax_fetch]
+        ax_fetch_resp = OpenID::AX::FetchResponse.from_success_response(oidresp)
+        ax_fetch_message = "\n\n" + t(:attribute_exchange_data_requested)
+        unless ax_fetch_resp
+          ax_fetch_message << ", " + t(:but_none_was_returned)
         else
-          ax_message << ". The following data were sent:\n"
-          ax_resp.data.each { |k,v| ax_message << "#{k}: #{v}\n" }
+          ax_fetch_message << ". " + t(:the_following_data_were_sent) + "\n"
+          ax_fetch_resp.data.each { |k,v| ax_fetch_message << "#{k}: #{v}\n" }
         end
-        flash[:notice] += ax_message
+        flash[:notice] += ax_fetch_message
+      end
+      if params[:did_ax_store]
+        ax_store_resp = OpenID::AX::StoreResponse.from_success_response(oidresp)
+        ax_store_message = "\n\n" + t(:attribute_exchange_store_requested)
+        unless ax_store_resp
+          ax_store_message << ", " + t(:but_got_no_response)
+        else
+          if ax_store_resp.succeeded?
+            ax_store_message << " " + t(:and_saved_at_the_identity_provider)
+          else
+            ax_store_message << ", " + t(:but_an_error_occured, :error_message => ax_store_resp.error_message)
+          end
+        end
+        flash[:notice] += ax_store_message
       end
       if params[:did_pape]
         pape_resp = OpenID::PAPE::Response.from_success_response(oidresp)
-        pape_message = "\n\nAuthentication policies were requested"
+        pape_message = "\n\n" + t(:authentication_policies_requested)
         unless pape_resp.auth_policies.empty?
-          pape_message << ", and the server reported the following:\n"
+          pape_message << ", " + t(:and_server_reported_the_following) + "\n"
           pape_resp.auth_policies.each { |p| pape_message << "#{p}\n" }
         else
-          pape_message << ", but the server did not report one."
+          pape_message << ", " + t(:but_the_server_did_not_report_one)
         end
-        pape_message << "\nAuthentication time: #{pape_resp.auth_time}" if pape_resp.auth_time
+        pape_message << "\n" + t(:authentication_time) + ": #{pape_resp.auth_time}" if pape_resp.auth_time
         pape_message << "\nNIST Auth Level: #{pape_resp.nist_auth_level}" if pape_resp.nist_auth_level
         flash[:notice] += pape_message
       end

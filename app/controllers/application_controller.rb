@@ -16,6 +16,8 @@ class ApplicationController < ActionController::Base
   helper_method :extract_host, :extract_login_from_identifier, :checkid_request,
     :identifier, :endpoint_url, :scheme
   
+  before_filter :set_locale
+  
   protected
   
   # before_filter for every account-based controller
@@ -70,10 +72,21 @@ class ApplicationController < ActionController::Base
     render :file => "#{RAILS_ROOT}/public/#{status_code}.html", :status => status_code
   end
   
+  # Set site locale from
+  # * params[:locale]
+  # * HTTP_ACCEPT_LANGUAGE header
+  # 
+  # If desired locale is not supported or nothing is set, fallback to English ("en")
+  def set_locale 
+    locale = params[:locale]
+    locale ||= request.env['HTTP_ACCEPT_LANGUAGE'].scan(/^[a-z]{2}/).first if request.env['HTTP_ACCEPT_LANGUAGE']
+    I18n.locale = (locale && I18n.available_locales.include?(locale.to_sym)) ? locale : I18n.default_locale
+  end 
+  
   private
   
   def scheme
     APP_CONFIG['use_ssl'] ? 'https' : 'http'
   end
-  
+
 end
